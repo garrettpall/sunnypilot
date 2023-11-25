@@ -113,9 +113,7 @@ class CarInterface(CarInterfaceBase):
         ret.minEnableSpeed = -1.  # engage speed is decided by ASCM
         ret.minSteerSpeed = 30 * CV.MPH_TO_MS
         ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_HW_SDGM
-        if experimental_long:
-          ret.openpilotLongitudinalControl = True
-          ret.customStockLongAvailable = True
+        ret.customStockLongAvailable = True
 
     else:  # ASCM, OBD-II harness
       ret.openpilotLongitudinalControl = True
