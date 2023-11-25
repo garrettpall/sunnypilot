@@ -36,10 +36,11 @@ class CarState(CarStateBase):
     if self.CP.carFingerprint not in SDGM_CAR:
       self.cruise_buttons = pt_cp.vl["ASCMSteeringButton"]["ACCButtons"]
       self.buttons_counter = pt_cp.vl["ASCMSteeringButton"]["RollingCounter"]
+      self.gap_dist_button = pt_cp.vl["ASCMSteeringButton"]["DistanceButton"]
     else:
       self.cruise_buttons = cam_cp.vl["ASCMSteeringButton"]["ACCButtons"]
       self.buttons_counter = cam_cp.vl["ASCMSteeringButton"]["RollingCounter"]
-    self.gap_dist_button = pt_cp.vl["ASCMSteeringButton"]["DistanceButton"]
+      self.gap_dist_button = cam_cp.vl["ASCMSteeringButton"]["DistanceButton"]
     self.pscm_status = copy.copy(pt_cp.vl["PSCMStatus"])
     self.moving_backward = pt_cp.vl["EBCMWheelSpdRear"]["MovingBackward"] != 0
     self.prev_mads_enabled = self.mads_enabled
