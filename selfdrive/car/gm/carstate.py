@@ -65,7 +65,10 @@ class CarState(CarStateBase):
     # sample rear wheel speeds, standstill=True if ECM allows engagement with brake
     ret.standstill = ret.wheelSpeeds.rl <= STANDSTILL_THRESHOLD and ret.wheelSpeeds.rr <= STANDSTILL_THRESHOLD
 
-    self.lkas_enabled = pt_cp.vl["ASCMSteeringButton"]["LKAButton"]
+    if self.CP.carFingerprint not in SDGM_CAR:
+      self.lkas_enabled = pt_cp.vl["ASCMSteeringButton"]["LKAButton"]
+    else:
+      self.lkas_enabled = cam_cp.vl["ASCMSteeringButton"]["LKAButton"]
 
     if pt_cp.vl["ECMPRDNL2"]["ManualMode"] == 1:
       ret.gearShifter = self.parse_gear_shifter("T")
