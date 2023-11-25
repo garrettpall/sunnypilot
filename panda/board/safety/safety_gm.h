@@ -146,7 +146,7 @@ static int gm_rx_hook(CANPacket_t *to_push) {
 
     if (addr == 0xC9) {
       acc_main_on = GET_BIT(to_push, 29U) != 0U;
-      mads_acc_main_check(acc_main_on);
+      // mads_acc_main_check(acc_main_on);
     }
 
     bool stock_ecu_detected = (addr == 0x180);  // ASCMLKASteeringCmd
@@ -220,14 +220,14 @@ static int gm_tx_hook(CANPacket_t *to_send) {
   }
 
   // BUTTONS: used for resume spamming and cruise cancellation with stock longitudinal
-  if ((addr == 0x1E1) && gm_pcm_cruise) {
-    int button = (GET_BYTE(to_send, 5) >> 4) & 0x7U;
+  // if ((addr == 0x1E1) && gm_pcm_cruise) {
+  //   int button = (GET_BYTE(to_send, 5) >> 4) & 0x7U;
 
-    bool allowed_cancel = (button == 6) && cruise_engaged_prev;
-    if (!allowed_cancel) {
-      tx = 0;
-    }
-  }
+  //   bool allowed_cancel = (button == 6) && cruise_engaged_prev;
+  //   if (!allowed_cancel) {
+  //     tx = 0;
+  //   }
+  // }
 
   // 1 allows the message through
   return tx;
