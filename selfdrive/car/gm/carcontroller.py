@@ -1,4 +1,5 @@
 from cereal import car
+import cereal.messaging as messaging
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.numpy_fast import interp
 from openpilot.common.realtime import DT_CTRL
@@ -6,6 +7,8 @@ from opendbc.can.packer import CANPacker
 from openpilot.selfdrive.car import apply_driver_steer_torque_limits
 from openpilot.selfdrive.car.gm import gmcan
 from openpilot.selfdrive.car.gm.values import DBC, CanBus, CarControllerParams, CruiseButtons, SDGM_CAR
+from openpilot.selfdrive.controls.lib.drive_helpers import GM_V_CRUISE_MIN
+
 
 VisualAlert = car.CarControl.HUDControl.VisualAlert
 NetworkLocation = car.CarParams.NetworkLocation
@@ -38,7 +41,59 @@ class CarController:
     self.packer_obj = CANPacker(DBC[self.CP.carFingerprint]['radar'])
     self.packer_ch = CANPacker(DBC[self.CP.carFingerprint]['chassis'])
 
+    sub_services = ['longitudinalPlanSP']
+    if sub_services:
+      self.sm = messaging.SubMaster(sub_services)
+
+    self.is_metric = self.param_s.get_bool("IsMetric")
+    self.speed_limit_control_enabled = False
+    self.last_speed_limit_sign_tap = False
+    self.last_speed_limit_sign_tap_prev = False
+    self.speed_limit = 0.
+    self.speed_limit_offset = 0
+    self.timer = 0
+    self.final_speed_kph = 0
+    self.init_speed = 0
+    self.current_speed = 0
+    self.v_set_dis = 0
+    self.v_cruise_min = 0
+    self.button_type = 0
+    self.button_select = 0
+    self.button_count = 0
+    self.target_speed = 0
+    self.t_interval = 7
+    self.slc_active_stock = False
+    self.sl_force_active_timer = 0
+    self.v_tsc_state = 0
+    self.slc_state = 0
+    self.m_tsc_state = 0
+    self.cruise_button = None
+    self.speed_diff = 0
+    self.v_tsc = 0
+    self.m_tsc = 0
+    self.steady_speed = 0
+
   def update(self, CC, CS, now_nanos):
+    if not self.CP.pcmCruiseSpeed or (self.CP.openpilotLongitudinalControl and self.frame % 5 == 0):
+      self.sm.update(0)
+
+    if not self.CP.pcmCruiseSpeed:
+      if self.sm.updated['longitudinalPlanSP']:
+        self.v_tsc_state = self.sm['longitudinalPlanSP'].visionTurnControllerState
+        self.slc_state = self.sm['longitudinalPlanSP'].speedLimitControlState
+        self.m_tsc_state = self.sm['longitudinalPlanSP'].turnSpeedControlState
+        self.speed_limit = self.sm['longitudinalPlanSP'].speedLimit
+        self.speed_limit_offset = self.sm['longitudinalPlanSP'].speedLimitOffset
+        self.v_tsc = self.sm['longitudinalPlanSP'].visionTurnSpeed
+        self.m_tsc = self.sm['longitudinalPlanSP'].turnSpeed
+
+      if self.frame % 200 == 0:
+        self.speed_limit_control_enabled = self.param_s.get_bool("EnableSlc")
+        self.is_metric = self.param_s.get_bool("IsMetric")
+      self.last_speed_limit_sign_tap = self.param_s.get_bool("LastSpeedLimitSignTap")
+      self.v_cruise_min = GM_V_CRUISE_MIN[self.is_metric] * (CV.KPH_TO_MPH if not self.is_metric else 1)
+
+
     actuators = CC.actuators
     hud_control = CC.hudControl
     hud_alert = hud_control.visualAlert
@@ -143,6 +198,12 @@ class CarController:
       # A delayed cancellation allows camera to cancel and avoids a fault when user depresses brake quickly
       self.cancel_counter = self.cancel_counter + 1 if CC.cruiseControl.cancel else 0
 
+      if not (CC.cruiseControl.cancel or CC.cruiseControl.resume) and CS.out.cruiseState.enabled and not self.CP.pcmCruiseSpeed:
+          self.cruise_button = self.get_cruise_buttons(CS, CC.vCruise)
+          if self.cruise_button is not None:
+            if self.frame % 4 == 0:
+              can_sends.extend(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, CS.buttons_counter, self.cruise_button))
+
       # Stock longitudinal, integrated at camera
       if (self.frame - self.last_button_frame) * DT_CTRL > 0.04:
         if self.cancel_counter > CAMERA_CANCEL_DELAY_FRAMES:
@@ -151,7 +212,7 @@ class CarController:
             can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, CS.buttons_counter, CruiseButtons.CANCEL))
           else:
             can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.CAMERA, CS.buttons_counter, CruiseButtons.CANCEL))
-            
+
     if self.CP.networkLocation == NetworkLocation.fwdCamera:
       # Silence "Take Steering" alert sent by camera, forward PSCMStatus with HandsOffSWlDetectionStatus=1
       if self.frame % 10 == 0:
@@ -180,3 +241,120 @@ class CarController:
 
     self.frame += 1
     return new_actuators, can_sends
+
+  # multikyd methods, sunnyhaibin logic
+  def get_cruise_buttons_status(self, CS):
+    if not CS.out.cruiseState.enabled or CS.cruise_buttons != CruiseButtons.INIT:
+      self.timer = 40
+    elif self.timer:
+      self.timer -= 1
+    else:
+      return 1
+    return 0
+
+  def get_target_speed(self, v_cruise_kph_prev):
+    v_cruise_kph = v_cruise_kph_prev
+    if self.slc_state > 1:
+      v_cruise_kph = (self.speed_limit + self.speed_limit_offset) * CV.MS_TO_KPH
+      if not self.slc_active_stock:
+        v_cruise_kph = v_cruise_kph_prev
+    return v_cruise_kph
+
+  def get_button_type(self, button_type):
+    self.type_status = "type_" + str(button_type)
+    self.button_picker = getattr(self, self.type_status, lambda: "default")
+    return self.button_picker()
+
+  def reset_button(self):
+    if self.button_type != 3:
+      self.button_type = 0
+
+  def type_default(self):
+    self.button_type = 0
+    return None
+
+  def type_0(self):
+    self.button_count = 0
+    self.target_speed = self.init_speed
+    self.speed_diff = self.target_speed - self.v_set_dis
+    if self.target_speed > self.v_set_dis:
+      self.button_type = 1
+    elif self.target_speed < self.v_set_dis and self.v_set_dis > self.v_cruise_min:
+      self.button_type = 2
+    return None
+
+  def type_1(self):
+    cruise_button = CruiseButtons.RES_ACCEL
+    self.button_count += 1
+    if self.target_speed <= self.v_set_dis:
+      self.button_count = 0
+      self.button_type = 3
+    elif self.button_count > 5:
+      self.button_count = 0
+      self.button_type = 3
+    return cruise_button
+
+  def type_2(self):
+    cruise_button = CruiseButtons.DECEL_SET
+    self.button_count += 1
+    if self.target_speed >= self.v_set_dis or self.v_set_dis <= self.v_cruise_min:
+      self.button_count = 0
+      self.button_type = 3
+    elif self.button_count > 5:
+      self.button_count = 0
+      self.button_type = 3
+    return cruise_button
+
+  def type_3(self):
+    cruise_button = None
+    self.button_count += 1
+    if self.button_count > self.t_interval:
+      self.button_type = 0
+    return cruise_button
+
+  def get_curve_speed(self, target_speed_kph, v_cruise_kph_prev):
+    if self.v_tsc_state != 0:
+      vision_v_cruise_kph = self.v_tsc * CV.MS_TO_KPH
+      if int(vision_v_cruise_kph) == int(v_cruise_kph_prev):
+        vision_v_cruise_kph = 255
+    else:
+      vision_v_cruise_kph = 255
+    if self.m_tsc_state > 1:
+      map_v_cruise_kph = self.m_tsc * CV.MS_TO_KPH
+      if int(map_v_cruise_kph) == 0.0:
+        map_v_cruise_kph = 255
+    else:
+      map_v_cruise_kph = 255
+    curve_speed = self.curve_speed_hysteresis(min(vision_v_cruise_kph, map_v_cruise_kph) + 2 * CV.MPH_TO_KPH)
+    return min(target_speed_kph, curve_speed)
+
+  def get_button_control(self, CS, final_speed, v_cruise_kph_prev):
+    self.init_speed = round(min(final_speed, v_cruise_kph_prev) * (CV.KPH_TO_MPH if not self.is_metric else 1))
+    self.v_set_dis = round(CS.out.cruiseState.speed * (CV.MS_TO_MPH if not self.is_metric else CV.MS_TO_KPH))
+    cruise_button = self.get_button_type(self.button_type)
+    return cruise_button
+
+  def curve_speed_hysteresis(self, cur_speed: float, hyst=(0.75 * CV.MPH_TO_KPH)):
+    if cur_speed > self.steady_speed:
+      self.steady_speed = cur_speed
+    elif cur_speed < self.steady_speed - hyst:
+      self.steady_speed = cur_speed
+    return self.steady_speed
+
+  def get_cruise_buttons(self, CS, v_cruise_kph_prev):
+    cruise_button = None
+    if not self.get_cruise_buttons_status(CS):
+      pass
+    elif CS.out.cruiseState.enabled:
+      set_speed_kph = self.get_target_speed(v_cruise_kph_prev)
+      if self.slc_state > 1:
+        target_speed_kph = set_speed_kph
+      else:
+        target_speed_kph = min(v_cruise_kph_prev, set_speed_kph)
+      if self.v_tsc_state != 0 or self.m_tsc_state > 1:
+        self.final_speed_kph = self.get_curve_speed(target_speed_kph, v_cruise_kph_prev)
+      else:
+        self.final_speed_kph = target_speed_kph
+
+      cruise_button = self.get_button_control(CS, self.final_speed_kph, v_cruise_kph_prev)  # MPH/KPH based button presses
+    return cruise_button

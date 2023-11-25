@@ -106,13 +106,16 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_HW_CAM_LONG
 
     elif candidate in SDGM_CAR:
-        ret.experimentalLongitudinalAvailable = False
+        ret.experimentalLongitudinalAvailable = True
         ret.networkLocation = NetworkLocation.fwdCamera
         ret.pcmCruise = True
         ret.radarUnavailable = True
         ret.minEnableSpeed = -1.  # engage speed is decided by ASCM
         ret.minSteerSpeed = 30 * CV.MPH_TO_MS
         ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_HW_SDGM
+        if experimental_long:
+          ret.openpilotLongitudinalControl = True
+          ret.customStockLongAvailable = True
 
     else:  # ASCM, OBD-II harness
       ret.openpilotLongitudinalControl = True

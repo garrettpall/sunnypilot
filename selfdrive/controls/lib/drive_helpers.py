@@ -65,6 +65,10 @@ VOLKSWAGEN_V_CRUISE_MIN = {
   True: 30,
   False: int(20 * CV.MPH_TO_KPH),
 }
+GM_V_CRUISE_MIN = {
+  True: 30,
+  False: int(20 * CV.MPH_TO_KPH),
+}
 
 SpeedLimitControlState = custom.LongitudinalPlanSP.SpeedLimitControlState
 
