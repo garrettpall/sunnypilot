@@ -2,6 +2,7 @@ from cereal import car
 import cereal.messaging as messaging
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.numpy_fast import interp
+from openpilot.common.params import Params
 from openpilot.common.realtime import DT_CTRL
 from opendbc.can.packer import CANPacker
 from openpilot.selfdrive.car import apply_driver_steer_torque_limits
@@ -45,6 +46,7 @@ class CarController:
     if sub_services:
       self.sm = messaging.SubMaster(sub_services)
 
+    self.param_s = Params()
     self.is_metric = self.param_s.get_bool("IsMetric")
     self.speed_limit_control_enabled = False
     self.last_speed_limit_sign_tap = False
