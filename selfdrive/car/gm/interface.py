@@ -72,6 +72,8 @@ class CarInterface(CarInterfaceBase):
     ret.carName = "gm"
     ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.gm)]
     ret.autoResumeSng = False
+    ret.customStockLongAvailable = False
+
 
     if candidate in EV_CAR:
       ret.transmissionType = TransmissionType.direct
@@ -106,7 +108,7 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_HW_CAM_LONG
 
     elif candidate in SDGM_CAR:
-        ret.experimentalLongitudinalAvailable = True
+        ret.experimentalLongitudinalAvailable = False
         ret.networkLocation = NetworkLocation.fwdCamera
         ret.pcmCruise = True
         ret.radarUnavailable = True
