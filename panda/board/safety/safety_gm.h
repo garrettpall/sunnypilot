@@ -146,7 +146,7 @@ static int gm_rx_hook(CANPacket_t *to_push) {
 
     if (addr == 0xC9) {
       acc_main_on = GET_BIT(to_push, 29U) != 0U;
-      // mads_acc_main_check(acc_main_on);
+      mads_acc_main_check(acc_main_on);
     }
 
     bool stock_ecu_detected = (addr == 0x180);  // ASCMLKASteeringCmd
